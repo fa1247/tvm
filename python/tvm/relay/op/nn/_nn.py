@@ -44,7 +44,7 @@ def truncuate_min(x: relay.expr.Call, th=-128, dtype="int8"):
     threashold = relay.ones_like(x) * relay.const(th, dtype=dtype)
     return relay.where(relay.less(x, threashold), threashold, x)
 
-@reg.register_legalize("nn.mcutruncate", level=10)
+# @reg.register_legalize("nn.mcutruncate", level=10)
 def mcu_nn_truncate(attrs, inputs, types):
     x = inputs[0]
     dtype = types[0].dtype
@@ -52,7 +52,7 @@ def mcu_nn_truncate(attrs, inputs, types):
     int8_res = truncuate_min(int8_res, th=-128, dtype=dtype)
     return relay.cast(int8_res, type[1].dtype)
 
-reg.register_pattern("nn.mcutruncate", OpPattern.OUT_ELEMWISE_FUSABLE)
+# reg.register_pattern("nn.mcutruncate", OpPattern.OUT_ELEMWISE_FUSABLE)
 # reg.register_strategy("nn.mcutruncate", strategy.cumsum_strategy)
 
 
