@@ -28,6 +28,7 @@
 #include <tvm/te/tensor.h>
 #include <tvm/tir/expr.h>
 
+#include <chrono>
 #include <thread>
 
 namespace tvm {
@@ -121,11 +122,11 @@ TVM_REGISTER_GLOBAL("testing.object_use_count").set_body([](TVMArgs args, TVMRet
 
 class FrontendTestModuleNode : public runtime::ModuleNode {
  public:
-  virtual const char* type_key() const { return "frontend_test"; }
+  const char* type_key() const final { return "frontend_test"; }
 
   static constexpr const char* kAddFunctionName = "__add_function";
 
-  virtual PackedFunc GetFunction(const std::string& name, const ObjectPtr<Object>& sptr_to_self);
+  virtual PackedFunc GetFunction(const String& name, const ObjectPtr<Object>& sptr_to_self);
 
  private:
   std::unordered_map<std::string, PackedFunc> functions_;
@@ -133,7 +134,7 @@ class FrontendTestModuleNode : public runtime::ModuleNode {
 
 constexpr const char* FrontendTestModuleNode::kAddFunctionName;
 
-PackedFunc FrontendTestModuleNode::GetFunction(const std::string& name,
+PackedFunc FrontendTestModuleNode::GetFunction(const String& name,
                                                const ObjectPtr<Object>& sptr_to_self) {
   if (name == kAddFunctionName) {
     return TypedPackedFunc<void(std::string, PackedFunc)>(
@@ -158,5 +159,10 @@ runtime::Module NewFrontendTestModule() {
 }
 
 TVM_REGISTER_GLOBAL("testing.FrontendTestModule").set_body_typed(NewFrontendTestModule);
+
+TVM_REGISTER_GLOBAL("testing.sleep_in_ffi").set_body_typed([](double timeout) {
+  std::chrono::duration<int64_t, std::nano> duration(static_cast<int64_t>(timeout * 1e9));
+  std::this_thread::sleep_for(duration);
+});
 
 }  // namespace tvm

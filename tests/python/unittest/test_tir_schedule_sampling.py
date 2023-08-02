@@ -19,6 +19,7 @@ import sys
 
 import numpy
 import pytest
+import tvm.testing
 
 from tvm import tir
 from tvm.script import tir as T
@@ -40,9 +41,9 @@ def elementwise(a: T.handle, b: T.handle) -> None:
 
 @T.prim_func
 def tiled_conv2d_with_padding(
-    inputs: T.Buffer[(1, 224, 224, 3), "float32"],
-    weight: T.Buffer[(7, 7, 3, 64), "float32"],
-    conv2d_nhwc: T.Buffer[(1, 112, 112, 64), "float32"],
+    inputs: T.Buffer((1, 224, 224, 3), "float32"),
+    weight: T.Buffer((7, 7, 3, 64), "float32"),
+    conv2d_nhwc: T.Buffer((1, 112, 112, 64), "float32"),
 ) -> None:
     PadInput = T.alloc_buffer([1, 230, 230, 3], dtype="float32")
     for i0, i1, i2, i3 in T.grid(1, 230, 230, 3):
@@ -178,10 +179,16 @@ def test_sample_perfect_tile_composite():
     verify_trace_roundtrip(sch, mod=elementwise)
 
 
-def test_sample_compute_location():
+use_sugared_block = tvm.testing.parameter(by_dict={"block_obj": False, "block_name": True})
+
+
+def test_sample_compute_location(use_sugared_block):
     n = 100
     sch = tir.Schedule(tiled_conv2d_with_padding, seed=42, debug_mask="all")
-    pad_input = sch.get_block("PadInput")
+    if use_sugared_block:
+        pad_input = "PadInput"
+    else:
+        pad_input = sch.get_block("PadInput")
     decision_dict = dict()
     for _ in range(n):
         _ = sch.sample_compute_location(pad_input)  # pylint: disable=invalid-name
@@ -206,4 +213,4 @@ def test_sample_perfect_tile_after_copy():
 
 
 if __name__ == "__main__":
-    sys.exit(pytest.main([__file__] + sys.argv[1:]))
+    tvm.testing.main()

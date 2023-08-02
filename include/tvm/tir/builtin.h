@@ -611,6 +611,18 @@ TVM_DLL const Op& tvm_store_matrix_sync();
 TVM_DLL const Op& ptx_mma();
 
 /*!
+ * \brief tvm intrinsic for ptx predicate load with 32-bit data type.
+ *
+ */
+TVM_DLL const Op& ptx_ldg32();
+
+/*!
+ * \brief tvm intrinsic for ptx predicate load with 32-bit data type.
+ *
+ */
+TVM_DLL const Op& ptx_ldg32();
+
+/*!
  * \brief tvm intrinsic for sparse tensor core ptx instructions.
  *
  * void ptx_mma_sp(StringImm shape, StringImm A_layout, StringImm B_layout,
@@ -631,6 +643,52 @@ TVM_DLL const Op& ptx_mma_sp();
  *                   Var smem_ptr, Expr smem_offset);
  */
 TVM_DLL const Op& ptx_ldmatrix();
+
+/*!
+ * \brief tvm intrinsics for ptx async copy from global to shared memory
+ *
+ * void ptx_cp_async(Var shared_ptr, Expr shared_offset, Var global_ptr, Expr global_offset, size_t
+ * bytes);
+ *
+ */
+TVM_DLL const Op& ptx_cp_async();
+
+/*!
+ * \brief tvm intrinsics for ptx async copy commit and wait.
+ *
+ * void ptx_commit_group();
+ * void ptx_wait_group(int num);
+ *
+ */
+TVM_DLL const Op& ptx_commit_group();
+TVM_DLL const Op& ptx_wait_group();
+
+/*!
+ * \brief tvm intrinsic for storing the result of PTX MMA into a destination pointer.
+ *        For example, if each thread in a warp of size 32 has 4 elements from the result of
+ *        m16xn8xk16 MMA in its registers, this intrinsic can be used to store the result in a
+ *        16x8 region in shared or global memory.
+ *
+ *        There is no real PTX instruction that does that, but we want to hide details of
+ *        complex index manipulation behind this intrinsic to simplify TIR lowering passes (e.g.
+ *        LowerWarpMemory).
+ *
+ * void mma_store(IntImm m, IntImm n, Var dst_ptr, Var src_ptr, Expr src_offset, Var dst_stride);
+ */
+TVM_DLL const Op& mma_store();
+
+/*!
+ * \brief tvm intrinsic for zero-initalizing an MMA accumulation registor.
+ *        For example, if each thread in a warp of size 32 has 8 elements from the A matrix in
+ *        m16xn8xk16 MMA in its registers, this intrinsic can be used to zero-initialize its
+ *        4 accumulation registers.
+ *
+ *        There is no real PTX instruction that does that, but we introduce this intrinsic for the
+ *        same reason as mma_store above.
+ *
+ * void mma_fill(IntImm local_size, Var local_ptr, Expr offset);
+ */
+TVM_DLL const Op& mma_fill();
 
 // TODO(tvm-team) replace the usage of the vector operations by Shuffle.
 /*!
@@ -668,11 +726,76 @@ TVM_DLL const Op& texture2d_store();
 TVM_DLL const Op& texture2d_load();
 
 /*!
- * \brief Copy 1d memory from source to destination
- * Same semantics as memcpy(destination, source, size)
- * Allows for device specific implementations e.g. direct memory access (DMA)
+ * \brief Initiate a non-blocking DMA copy from source to destination
+ *
+ * The copy is launched immediately.
+ *
+ * If a `dma_start_group()` call is active, the copy will be added
+ * to the current group for tracking of in-flight group counts.
+ *
+ * If no `dma_start_group()` call is active, the copy will be tracked
+ * individually i.e. as a group with size 1.
  */
-TVM_DLL const Op& mem_copy();
+TVM_DLL const Op& dma_copy();
+
+/*!
+ * \brief Wait until the number of DMA groups in flight is less than
+ * or equal to some maximum
+ *
+ * Calling `dma_wait()` while a group is active is unsupported.
+ */
+TVM_DLL const Op& dma_wait();
+
+/*!
+ * \brief Start a group of DMA copies
+ *
+ * Any call to `dma_copy()` that occurs after `dma_start_group()` will
+ * be added to the current group for tracking of in-flight group counts.
+ *
+ * Only one DMA group may be active at a given time.  Calling
+ * `dma_start_group()` while a group is active is unsupported.
+ */
+TVM_DLL const Op& dma_start_group();
+
+/*!
+ * \brief End a group of DMA copies
+ *
+ * Track all calls to `dma_copy()` that occurred since the preceding
+ * `dma_start_group()` as a single group in-flight.
+ *
+ * Calling `dma_end_group()` without an active group is unsupported.
+ *
+ * Note: A group of DMA calls may be empty, and will still contribute
+ * to the count of in-flight groups used by `dma_wait()`.
+ */
+TVM_DLL const Op& dma_end_group();
+
+/*!
+ * \brief Provide a true statement that can be used for simplifications
+ *
+ * Compile-time representation of known constraints about function
+ * inputs.  This assumption is removed when lowering, and does not
+ * occur in codegen.
+ */
+TVM_DLL const Op& assume();
+
+/*!
+ * \brief Returns an initialized but arbitrary value
+ *
+ * Compile-time representation of memory locations whose values may be
+ * altered as a result of optimizations.
+ */
+TVM_DLL const Op& undef();
+
+/*!
+ * \brief Profiling intrinsic
+ */
+TVM_DLL const Op& start_profile_intrinsic();
+
+/*!
+ * \brief Profiling intrinsic
+ */
+TVM_DLL const Op& end_profile_intrinsic();
 
 /*! \brief The kind of structure field info used in intrinsic */
 enum TVMStructFieldKind : int {

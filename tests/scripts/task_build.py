@@ -19,11 +19,15 @@ import argparse
 import shutil
 import os
 import logging
+import sys
 import multiprocessing
 
 from pathlib import Path
-from cmd_utils import Sh, init_log, REPO_ROOT
 
+# Hackery to enable importing of utils from ci/scripts/jenkins
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(REPO_ROOT / "ci" / "scripts" / "jenkins"))
+from cmd_utils import Sh, init_log, REPO_ROOT
 
 if __name__ == "__main__":
     init_log()
@@ -37,20 +41,21 @@ if __name__ == "__main__":
     env = {"VTA_HW_PATH": str(Path(os.getcwd()) / "3rdparty" / "vta-hw")}
     sccache_exe = shutil.which("sccache")
 
-    use_sccache = sccache_exe is not None and args.sccache_bucket is not None
+    use_sccache = sccache_exe is not None
     build_dir = Path(os.getcwd()) / args.build_dir
     build_dir = build_dir.relative_to(REPO_ROOT)
 
     if use_sccache:
-        env["SCCACHE_BUCKET"] = args.sccache_bucket
+        if args.sccache_bucket:
+            env["SCCACHE_BUCKET"] = args.sccache_bucket
+            logging.info(f"Using sccache bucket: {args.sccache_bucket}")
+        else:
+            logging.info(f"No sccache bucket set, using local cache")
         env["CXX"] = "/opt/sccache/c++"
         env["CC"] = "/opt/sccache/cc"
 
-        logging.info(f"Using sccache bucket: {args.sccache_bucket}")
     else:
         if sccache_exe is None:
-            reason = "'sccache' executable not found"
-        elif args.sccache_bucket is None:
             reason = "'sccache' executable not found"
         else:
             reason = "<unknown>"
@@ -64,17 +69,34 @@ if __name__ == "__main__":
         sh.run("sccache --show-stats")
 
     executors = int(os.environ.get("CI_NUM_EXECUTORS", 1))
+    build_platform = os.environ.get("PLATFORM", None)
 
     nproc = multiprocessing.cpu_count()
 
     available_cpus = nproc // executors
     num_cpus = max(available_cpus, 1)
 
-    sh.run("cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ..", cwd=build_dir)
+    if build_platform == "i386":
+        sh.run("cmake ..", cwd=build_dir)
+    else:
+        sh.run("cmake -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo ..", cwd=build_dir)
+
     target = ""
     if args.cmake_target:
         target = args.cmake_target
-    sh.run(f"cmake --build . -- {target} VERBOSE=1 -j{num_cpus}", cwd=build_dir)
+
+    verbose = os.environ.get("VERBOSE", "true").lower() in {"1", "true", "yes"}
+    ninja_args = [target, f"-j{num_cpus}"]
+    if verbose:
+        ninja_args.append("-v")
+
+    if build_platform == "i386":
+        if args.cmake_target:
+            sh.run(f"make {args.cmake_target} -j{num_cpus}", cwd=build_dir)
+        else:
+            sh.run(f"make -j{num_cpus}", cwd=build_dir)
+    else:
+        sh.run(f"cmake --build . -- " + " ".join(ninja_args), cwd=build_dir)
 
     if use_sccache:
         logging.info("===== sccache stats =====")

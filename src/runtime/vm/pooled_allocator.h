@@ -28,6 +28,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -71,6 +72,15 @@ class PooledAllocator final : public Allocator {
     return buf;
   }
 
+  Buffer Alloc(int ndims, int64_t* shape, DLDataType type_hint,
+               const std::string& mem_scope) override {
+    if (mem_scope.empty() || mem_scope == "global") {
+      return Allocator::Alloc(device_, ndims, shape, type_hint, mem_scope);
+    }
+    LOG(FATAL) << "This alloc should be implemented";
+    return {};
+  }
+
   void Free(const Buffer& buffer) override {
     std::lock_guard<std::recursive_mutex> lock(mu_);
     if (memory_pool_.find(buffer.size) == memory_pool_.end()) {
@@ -99,7 +109,7 @@ class PooledAllocator final : public Allocator {
  private:
   size_t page_size_;
   std::atomic<size_t> used_memory_;
-  std::unordered_map<size_t, std::vector<Buffer> > memory_pool_;
+  std::unordered_map<size_t, std::vector<Buffer>> memory_pool_;
   std::recursive_mutex mu_;
   Device device_;
 };

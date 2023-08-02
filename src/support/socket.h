@@ -34,7 +34,6 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
-using ssize_t = int;
 #ifdef _MSC_VER
 #pragma comment(lib, "Ws2_32.lib")
 #endif
@@ -57,6 +56,7 @@ using ssize_t = int;
 #include <unordered_map>
 #include <vector>
 
+#include "../support/ssize.h"
 #include "../support/utils.h"
 
 #if defined(_WIN32)
@@ -262,17 +262,17 @@ class Socket {
           0) {
         return port;
       } else {
+#if defined(_WIN32)
+        if (WSAGetLastError() != WSAEADDRINUSE) {
+          Socket::Error("TryBindHost");
+        }
+#else
+        if (errno != EADDRINUSE) {
+          Socket::Error("TryBindHost");
+        }
+#endif
         LOG(WARNING) << "Bind failed to " << host << ":" << port;
       }
-#if defined(_WIN32)
-      if (WSAGetLastError() != WSAEADDRINUSE) {
-        Socket::Error("TryBindHost");
-      }
-#else
-      if (errno != EADDRINUSE) {
-        Socket::Error("TryBindHost");
-      }
-#endif
     }
     return -1;
   }
@@ -553,7 +553,6 @@ class TCPSocket : public Socket {
       if (ret == -1) {
         if (LastErrorWouldBlock()) {
           LOG(FATAL) << "would block";
-          return ndone;
         }
         Socket::Error("RecvAll");
       }

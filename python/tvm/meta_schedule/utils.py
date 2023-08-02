@@ -16,12 +16,11 @@
 # under the License.
 """Utilities for meta schedule"""
 import ctypes
-import json
 import os
 import shutil
-from contextlib import contextmanager
 from typing import Any, Callable, List, Optional, Union
 
+import numpy as np  # type: ignore
 import psutil  # type: ignore
 from tvm._ffi import get_global_func, register_func
 from tvm.error import TVMError
@@ -86,7 +85,7 @@ def derived_object(cls: type) -> type:
     assert isinstance(cls.__base__, type)
     assert hasattr(
         cls, "_tvm_metadata"
-    ), "Please use the user-facing method overiding class, i.e., PyRunner."
+    ), "Please use the user-facing method overriding class, i.e., PyRunner."
 
     base = cls.__base__
     metadata = getattr(base, "_tvm_metadata")
@@ -114,7 +113,10 @@ def derived_object(cls: type) -> type:
 
         def __getattr__(self, name: str):
             """Bridge the attribute function."""
-            return self._inst.__getattribute__(name)
+            try:
+                return self._inst.__getattribute__(name)
+            except AttributeError:
+                return super(TVMDerivedObject, self).__getattr__(name)
 
         def __setattr__(self, name, value):
             if name not in ["_inst", "key", "handle"]:
@@ -126,6 +128,9 @@ def derived_object(cls: type) -> type:
     TVMDerivedObject.__name__ = cls.__name__
     TVMDerivedObject.__doc__ = cls.__doc__
     TVMDerivedObject.__module__ = cls.__module__
+    for key, value in cls.__dict__.items():
+        if isinstance(value, (classmethod, staticmethod)):
+            setattr(TVMDerivedObject, key, value)
     return TVMDerivedObject
 
 
@@ -157,14 +162,6 @@ def _cpu_count_impl(logical: bool = True) -> int:
     return psutil.cpu_count(logical=logical) or 1
 
 
-@register_func("meta_schedule._process_error_message")
-def _process_error_message(error_msg: str) -> str:
-    error_msg_lines = str(error_msg).splitlines()
-    if len(error_msg_lines) >= 50:
-        return "\n".join(error_msg_lines[:25] + ["..."] + error_msg_lines[-25:])
-    return error_msg
-
-
 def cpu_count(logical: bool = True) -> int:
     """Return the number of logical or physical CPUs in the system
 
@@ -191,6 +188,46 @@ def cpu_count(logical: bool = True) -> int:
     when measuring locally.
     """
     return _cpu_count_impl(logical)
+
+
+@register_func("meta_schedule.using_ipython")
+def _using_ipython() -> bool:
+    """Return whether the current process is running in an IPython shell.
+
+    Returns
+    -------
+    result : bool
+        Whether the current process is running in an IPython shell.
+    """
+    try:
+        return get_ipython().__class__.__name__ == "ZMQInteractiveShell"  # type: ignore
+    except NameError:
+        return False
+
+
+@register_func("meta_schedule.print_interactive_table")
+def print_interactive_table(data: str) -> None:
+    """Print the dataframe interactive table in notebook.
+
+    Parameters
+    ----------
+    data : str
+        The serialized performance table from MetaSchedule table printer.
+    """
+    import pandas as pd  # type: ignore # pylint: disable=import-outside-toplevel
+    from IPython.display import display  # type: ignore # pylint: disable=import-outside-toplevel
+
+    pd.set_option("display.max_rows", None)
+    pd.set_option("display.max_colwidth", None)
+    parsed = [
+        x.split("|")[1:] for x in list(filter(lambda x: set(x) != {"-"}, data.strip().split("\n")))
+    ]
+    display(
+        pd.DataFrame(
+            parsed[1:],
+            columns=parsed[0],
+        )
+    )
 
 
 def get_global_func_with_default_on_worker(
@@ -295,31 +332,6 @@ def _json_de_tvm(obj: Any) -> Any:
     raise TypeError("Not supported type: " + str(type(obj)))
 
 
-@register_func("meta_schedule.json_obj2str")
-def json_obj2str(json_obj: Any) -> str:
-    json_obj = _json_de_tvm(json_obj)
-    return json.dumps(json_obj)
-
-
-@register_func("meta_schedule.batch_json_str2obj")
-def batch_json_str2obj(json_strs: List[str]) -> List[Any]:
-    """Covert a list of JSON strings to a list of json objects.
-    Parameters
-    ----------
-    json_strs : List[str]
-        The list of JSON strings
-    Returns
-    -------
-    result : List[Any]
-        The list of json objects
-    """
-    return [
-        json.loads(json_str)
-        for json_str in map(str.strip, json_strs)
-        if json_str and (not json_str.startswith("#")) and (not json_str.startswith("//"))
-    ]
-
-
 def shash2hex(mod: IRModule) -> str:
     """Get the structural hash of a module.
 
@@ -339,8 +351,11 @@ def shash2hex(mod: IRModule) -> str:
 
 def _get_default_str(obj: Any) -> str:
     return (
-        f"meta_schedule.{obj.__class__.__name__}" + f"({_to_hex_address(obj._outer().handle)})"
-    )  # type: ignore
+        # pylint: disable=protected-access
+        f"meta_schedule.{obj.__class__.__name__}"
+        + f"({_to_hex_address(obj._outer().handle)})"  # type: ignore
+        # pylint: enable=protected-access
+    )
 
 
 def _to_hex_address(handle: ctypes.c_void_p) -> str:
@@ -357,14 +372,7 @@ def _to_hex_address(handle: ctypes.c_void_p) -> str:
     return hex(ctypes.cast(handle, ctypes.c_void_p).value)
 
 
-@contextmanager
-def autotvm_silencer():
-    """A context manager that silences autotvm warnings."""
-    from tvm import autotvm  # pylint: disable=import-outside-toplevel
-
-    silent = autotvm.GLOBAL_SCOPE.silent
-    autotvm.GLOBAL_SCOPE.silent = True
-    try:
-        yield
-    finally:
-        autotvm.GLOBAL_SCOPE.silent = silent
+def fork_seed(seed: Optional[int], n: int) -> List[int]:
+    # fmt: off
+    return np.random.RandomState(seed=seed).randint(1, 2 ** 30, size=n).tolist()
+    # fmt: on

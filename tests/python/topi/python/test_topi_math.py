@@ -117,8 +117,11 @@ ewise_operations = {
         "skip_name_check": True,
         "input_range": (-10, 10),
         "step": 0.01,
+        "dtypes": ["float32", "float16"],
+        "cast_output": True,
+        "tolerance": [1e-5, 1e-1],
     },
-    "fast_erf": {
+    "fast_tanh": {
         "topi": topi.fast_tanh,
         "ref": np.tanh,
         "skip_name_check": True,
@@ -127,11 +130,11 @@ ewise_operations = {
     },
 }
 
-topi_name, dtype = tvm.testing.parameters(
+topi_name, dtype, tolerance = tvm.testing.parameters(
     *[
-        (name, dtype)
+        (name, dtype, config.get("tolerance", [1e-5] * len(dtype))[i])
         for name, config in ewise_operations.items()
-        for dtype in config.get("dtypes", ["float32"])
+        for i, dtype in enumerate(config.get("dtypes", ["float32"]))
     ]
 )
 
@@ -159,10 +162,13 @@ def ewise_ref_data(topi_name, dtype):
 
     b_np = config["ref"](a_np)
 
+    if config.get("cast_output", False):
+        b_np = b_np.astype(dtype)
+
     return a_np, b_np
 
 
-def test_ewise(target, dev, topi_name, dtype, ewise_ref_data):
+def test_ewise(target, dev, topi_name, dtype, tolerance, ewise_ref_data):
     target = tvm.target.Target(target)
     if target.kind.name == "vulkan" and topi_name in ["tan", "erf", "isnan", "isfinite", "isinf"]:
         pytest.xfail(f"Vulkan runtime doesn't support {topi_name} yet")
@@ -187,16 +193,22 @@ def test_ewise(target, dev, topi_name, dtype, ewise_ref_data):
     a = tvm.nd.array(a_np, dev)
     b = tvm.nd.array(np.zeros_like(b_np), dev)
     foo(a, b)
-    tvm.testing.assert_allclose(b.numpy(), b_np, rtol=1e-5, atol=1e-5)
+    tvm.testing.assert_allclose(b.numpy(), b_np, rtol=tolerance, atol=tolerance)
 
 
 from_dtype, to_dtype = tvm.testing.parameters(
     ("int32", "float32"),
     ("int32", "float64"),
     ("int32", "bool"),
+    ("float16", "float32"),
+    ("float16", "float64"),
     ("float32", "int32"),
     ("float32", "float64"),
     ("float32", "bool"),
+    # disable this due to llvm5+ bug https://github.com/llvm/llvm-project/issues/56204
+    # TODO (yongwww): pattern match f64->f16 to f64->f32->f16 as a workaround
+    # ("float64", "float16"),
+    ("float64", "float32"),
     ("bool", "float32"),
     ("bool", "int32"),
 )
@@ -237,4 +249,4 @@ def test_cast(target, dev, cast_ref_data, from_dtype, to_dtype):
 
 
 if __name__ == "__main__":
-    sys.exit(pytest.main(sys.argv))
+    tvm.testing.main()
